@@ -9,6 +9,7 @@ import (
 	"github.com/influxdata/influxdb/cmd"
 	"github.com/influxdata/influxdb/cmd/store/help"
 	"github.com/influxdata/influxdb/cmd/store/query"
+	"github.com/influxdata/influxdb/cmd/store/tagkeys"
 	"github.com/influxdata/influxdb/logger"
 	_ "github.com/influxdata/influxdb/tsdb/engine"
 	"go.uber.org/zap"
@@ -56,6 +57,12 @@ func (m *Main) Run(args ...string) error {
 		name.Logger = m.Logger
 		if err := name.Run(args...); err != nil {
 			return fmt.Errorf("query: %s", err)
+		}
+	case "tag-keys":
+		name := tagkeys.NewCommand()
+		name.Logger = m.Logger
+		if err := name.Run(args...); err != nil {
+			return fmt.Errorf("tag-keys: %s", err)
 		}
 	default:
 		return fmt.Errorf(`unknown command "%s"`+"\n"+`Run 'store help' for usage`+"\n\n", name)

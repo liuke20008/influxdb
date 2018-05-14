@@ -32,6 +32,7 @@ Usage: store [[command] [arguments]]
 The commands are:
 
     query        queries data.
+    tag-keys     list tag keys.
     help         display this help message
 
 "help" is the default command.

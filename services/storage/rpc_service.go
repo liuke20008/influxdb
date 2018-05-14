@@ -80,7 +80,7 @@ func (r *rpcService) Read(req *ReadRequest, stream Storage_ReadServer) error {
 		SetTag("aggregate", agg.String())
 
 	if r.loggingEnabled {
-		r.Logger.Info("request",
+		r.Logger.Info("Read",
 			zap.String("database", req.Database),
 			zap.String("predicate", pred),
 			zap.Uint64("series_limit", req.SeriesLimit),
@@ -156,4 +156,30 @@ func (r *rpcService) Read(req *ReadRequest, stream Storage_ReadServer) error {
 	})
 
 	return nil
+}
+
+func (r *rpcService) ReadTagKeys(req *ReadTagKeysRequest, stream Storage_ReadTagKeysServer) error {
+	if r.loggingEnabled {
+		r.Logger.Info("ReadTagKeys",
+			zap.String("database", req.Database),
+			zap.String("predicate", ""),
+			zap.Int64("start", req.TimestampRange.Start),
+			zap.Int64("end", req.TimestampRange.End),
+		)
+	}
+
+	ctx := context.Background()
+	keys, err := r.Store.ReadTagKeys(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	var res ReadTagKeysResponse
+	res.Keys = keys
+
+	return stream.Send(&res)
+}
+
+func (r *rpcService) ReadTagKeyValues(req *ReadTagKeyValuesRequest, stream Storage_ReadTagKeyValuesServer) error {
+	return errors.New("not implemented")
 }

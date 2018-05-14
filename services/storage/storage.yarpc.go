@@ -16,6 +16,10 @@ It has these top-level messages:
 	CapabilitiesResponse
 	HintsResponse
 	TimestampRange
+	ReadTagKeysRequest
+	ReadTagKeysResponse
+	ReadTagKeyValuesRequest
+	ReadTagKeyValuesResponse
 	Node
 	Predicate
 */
@@ -23,6 +27,7 @@ package storage
 
 import (
 	context "context"
+
 	yarpc "github.com/influxdata/yarpc"
 )
 
@@ -54,6 +59,8 @@ type StorageClient interface {
 	// Capabilities returns a map of keys and values identifying the capabilities supported by the storage engine
 	Capabilities(ctx context.Context, in *google_protobuf1.Empty) (*CapabilitiesResponse, error)
 	Hints(ctx context.Context, in *google_protobuf1.Empty) (*HintsResponse, error)
+	ReadTagKeys(ctx context.Context, in *ReadTagKeysRequest) (Storage_ReadTagKeysClient, error)
+	ReadTagKeyValues(ctx context.Context, in *ReadTagKeyValuesRequest) (Storage_ReadTagKeyValuesClient, error)
 }
 
 type storageClient struct {
@@ -111,6 +118,64 @@ func (c *storageClient) Hints(ctx context.Context, in *google_protobuf1.Empty) (
 	return out, nil
 }
 
+func (c *storageClient) ReadTagKeys(ctx context.Context, in *ReadTagKeysRequest) (Storage_ReadTagKeysClient, error) {
+	stream, err := yarpc.NewClientStream(ctx, &_Storage_serviceDesc.Streams[1], c.cc, 0x0003)
+	if err != nil {
+		return nil, err
+	}
+	x := &storageReadTagKeysClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Storage_ReadTagKeysClient interface {
+	Recv() (*ReadTagKeysResponse, error)
+	yarpc.ClientStream
+}
+
+type storageReadTagKeysClient struct {
+	yarpc.ClientStream
+}
+
+func (x *storageReadTagKeysClient) Recv() (*ReadTagKeysResponse, error) {
+	m := new(ReadTagKeysResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *storageClient) ReadTagKeyValues(ctx context.Context, in *ReadTagKeyValuesRequest) (Storage_ReadTagKeyValuesClient, error) {
+	stream, err := yarpc.NewClientStream(ctx, &_Storage_serviceDesc.Streams[2], c.cc, 0x0004)
+	if err != nil {
+		return nil, err
+	}
+	x := &storageReadTagKeyValuesClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Storage_ReadTagKeyValuesClient interface {
+	Recv() (*ReadTagKeyValuesResponse, error)
+	yarpc.ClientStream
+}
+
+type storageReadTagKeyValuesClient struct {
+	yarpc.ClientStream
+}
+
+func (x *storageReadTagKeyValuesClient) Recv() (*ReadTagKeyValuesResponse, error) {
+	m := new(ReadTagKeyValuesResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // Server API for Storage service
 
 type StorageServer interface {
@@ -119,6 +184,8 @@ type StorageServer interface {
 	// Capabilities returns a map of keys and values identifying the capabilities supported by the storage engine
 	Capabilities(context.Context, *google_protobuf1.Empty) (*CapabilitiesResponse, error)
 	Hints(context.Context, *google_protobuf1.Empty) (*HintsResponse, error)
+	ReadTagKeys(*ReadTagKeysRequest, Storage_ReadTagKeysServer) error
+	ReadTagKeyValues(*ReadTagKeyValuesRequest, Storage_ReadTagKeyValuesServer) error
 }
 
 func RegisterStorageServer(s *yarpc.Server, srv StorageServer) {
@@ -162,6 +229,48 @@ func _Storage_Hints_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return srv.(StorageServer).Hints(ctx, in)
 }
 
+func _Storage_ReadTagKeys_Handler(srv interface{}, stream yarpc.ServerStream) error {
+	m := new(ReadTagKeysRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(StorageServer).ReadTagKeys(m, &storageReadTagKeysServer{stream})
+}
+
+type Storage_ReadTagKeysServer interface {
+	Send(*ReadTagKeysResponse) error
+	yarpc.ServerStream
+}
+
+type storageReadTagKeysServer struct {
+	yarpc.ServerStream
+}
+
+func (x *storageReadTagKeysServer) Send(m *ReadTagKeysResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _Storage_ReadTagKeyValues_Handler(srv interface{}, stream yarpc.ServerStream) error {
+	m := new(ReadTagKeyValuesRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(StorageServer).ReadTagKeyValues(m, &storageReadTagKeyValuesServer{stream})
+}
+
+type Storage_ReadTagKeyValuesServer interface {
+	Send(*ReadTagKeyValuesResponse) error
+	yarpc.ServerStream
+}
+
+type storageReadTagKeyValuesServer struct {
+	yarpc.ServerStream
+}
+
+func (x *storageReadTagKeyValuesServer) Send(m *ReadTagKeyValuesResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 var _Storage_serviceDesc = yarpc.ServiceDesc{
 	ServiceName: "storage.Storage",
 	Index:       0,
@@ -183,6 +292,18 @@ var _Storage_serviceDesc = yarpc.ServiceDesc{
 			StreamName:    "Read",
 			Index:         0,
 			Handler:       _Storage_Read_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ReadTagKeys",
+			Index:         3,
+			Handler:       _Storage_ReadTagKeys_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ReadTagKeyValues",
+			Index:         4,
+			Handler:       _Storage_ReadTagKeyValues_Handler,
 			ServerStreams: true,
 		},
 	},
