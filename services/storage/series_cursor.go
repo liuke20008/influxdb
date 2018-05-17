@@ -33,6 +33,15 @@ type seriesRow struct {
 	valueCond influxql.Expr
 }
 
+// clone ensures name, stags and tags are deep copies
+func (r *seriesRow) clone() seriesRow {
+	nr := *r
+	r.name = append([]byte(nil), r.name...)
+	r.stags = r.stags.Clone()
+	r.tags = r.tags.Clone()
+	return nr
+}
+
 type mapValuer map[string]string
 
 var _ influxql.Valuer = mapValuer(nil)
@@ -278,7 +287,7 @@ func (c *groupSeriesCursor) sort() {
 	var rows []seriesRow
 	row := c.seriesCursor.Next()
 	for row != nil {
-		rows = append(rows, *row)
+		rows = append(rows, row.clone())
 		row = c.seriesCursor.Next()
 	}
 
