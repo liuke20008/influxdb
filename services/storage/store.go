@@ -7,9 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/influxdata/influxdb/logger"
 	"github.com/influxdata/influxdb/models"
-	"github.com/influxdata/influxdb/query"
 	"github.com/influxdata/influxdb/services/meta"
 	"github.com/influxdata/influxdb/tsdb"
 	"go.uber.org/zap"
@@ -60,8 +58,6 @@ func (s *Store) validateArgs(database string, start, end int64) (string, string,
 	if p := strings.IndexByte(database, '/'); p > -1 {
 		database, rp = database[:p], database[p+1:]
 	}
-
-	s.Logger.Info("metaclient check", logger.Database(database))
 
 	di := s.MetaClient.Database(database)
 	if di == nil {
@@ -125,35 +121,6 @@ func (s *Store) Read(ctx context.Context, req *ReadRequest) (*ResultSet, error) 
 		},
 		cur: cur,
 	}, nil
-}
-
-type tagKeysSlice []tsdb.TagKeys
-
-func (a tagKeysSlice) Len() int           { return len(a) }
-func (a tagKeysSlice) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a tagKeysSlice) Less(i, j int) bool { return a[i].Measurement < a[j].Measurement }
-
-func (s *Store) ReadTagKeys(ctx context.Context, req *ReadTagKeysRequest) ([]string, error) {
-	database, rp, start, end, err := s.validateArgs(req.Database, req.TimestampRange.Start, req.TimestampRange.End)
-	if err != nil {
-		return nil, err
-	}
-
-	shardIDs, err := s.findShardIDs(database, rp, false, start, end)
-	if err != nil {
-		return nil, err
-	}
-
-	keys, err := s.TSDBStore.TagKeys(query.OpenAuthorizer, shardIDs, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return MergeTagKeys(keys), nil
-}
-
-func (s *Store) ReadTagKeyValues(ctx context.Context, req *ReadTagKeyValuesRequest) (interface{}, error) {
-	return nil, nil
 }
 
 func MergeTagKeys(keys []tsdb.TagKeys) []string {

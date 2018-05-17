@@ -1,7 +1,10 @@
 package storage
 
 import (
+	"fmt"
+
 	"github.com/influxdata/influxdb/models"
+	"github.com/influxdata/influxdb/tsdb"
 	"go.uber.org/zap"
 )
 
@@ -26,6 +29,8 @@ type responseWriter struct {
 		String   []*ReadResponse_Frame_StringPoints
 		Series   []*ReadResponse_Frame_Series
 	}
+
+	seriesOnly bool
 }
 
 func (w *responseWriter) getSeriesFrame(next models.Tags) *ReadResponse_Frame_Series {
@@ -67,6 +72,41 @@ func (w *responseWriter) startSeries(next models.Tags) {
 	}
 	w.res.Frames = append(w.res.Frames, ReadResponse_Frame{f})
 	w.sz += w.sf.Size()
+}
+
+func (w *responseWriter) streamCursor(cur tsdb.Cursor) {
+	if w.seriesOnly {
+		switch cur := cur.(type) {
+		case tsdb.IntegerBatchCursor:
+			w.streamIntegerSeries(cur)
+		case tsdb.FloatBatchCursor:
+			w.streamFloatSeries(cur)
+		case tsdb.UnsignedBatchCursor:
+			w.streamUnsignedSeries(cur)
+		case tsdb.BooleanBatchCursor:
+			w.streamBooleanSeries(cur)
+		case tsdb.StringBatchCursor:
+			w.streamStringSeries(cur)
+		default:
+			panic(fmt.Sprintf("unreachable: %T", cur))
+		}
+		return
+	}
+
+	switch cur := cur.(type) {
+	case tsdb.IntegerBatchCursor:
+		w.streamIntegerPoints(cur)
+	case tsdb.FloatBatchCursor:
+		w.streamFloatPoints(cur)
+	case tsdb.UnsignedBatchCursor:
+		w.streamUnsignedPoints(cur)
+	case tsdb.BooleanBatchCursor:
+		w.streamBooleanPoints(cur)
+	case tsdb.StringBatchCursor:
+		w.streamStringPoints(cur)
+	default:
+		panic(fmt.Sprintf("unreachable: %T", cur))
+	}
 }
 
 func (w *responseWriter) flushFrames() {

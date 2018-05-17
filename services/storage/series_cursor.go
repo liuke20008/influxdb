@@ -82,22 +82,8 @@ func newIndexSeriesCursor(ctx context.Context, req *ReadRequest, shards []*tsdb.
 	}
 	p := &indexSeriesCursor{row: seriesRow{query: queries}}
 
-	var (
-		remap map[string]string
-		mi    tsdb.MeasurementIterator
-	)
-	if req.RequestType == ReadRequestTypeMultiTenant {
-		p.multiTenant = true
-		m := []byte(req.OrgID)
-		m = append(m, 0, 0)
-		m = append(m, req.Database...)
-		mi = tsdb.NewMeasurementSliceIterator([][]byte{m})
-	} else {
-		remap = measurementRemap
-	}
-
 	if root := req.Predicate.GetRoot(); root != nil {
-		if p.cond, err = NodeToExpr(root, remap); err != nil {
+		if p.cond, err = NodeToExpr(root, measurementRemap); err != nil {
 			return nil, err
 		}
 
@@ -119,7 +105,7 @@ func newIndexSeriesCursor(ctx context.Context, req *ReadRequest, shards []*tsdb.
 	}
 
 	sg := tsdb.Shards(shards)
-	p.sqry, err = sg.CreateSeriesCursor(ctx, tsdb.SeriesCursorRequest{Measurements: mi}, opt.Condition)
+	p.sqry, err = sg.CreateSeriesCursor(ctx, tsdb.SeriesCursorRequest{}, opt.Condition)
 	if p.sqry != nil && err == nil {
 		var (
 			itr query.Iterator
@@ -225,16 +211,16 @@ func (c *indexSeriesCursor) Err() error {
 
 type limitSeriesCursor struct {
 	seriesCursor
-	n, o, c uint64
+	n, o, c int64
 }
 
-func newLimitSeriesCursor(ctx context.Context, cur seriesCursor, n, o uint64) *limitSeriesCursor {
+func newLimitSeriesCursor(ctx context.Context, cur seriesCursor, n, o int64) *limitSeriesCursor {
 	return &limitSeriesCursor{seriesCursor: cur, o: o, n: n}
 }
 
 func (c *limitSeriesCursor) Next() *seriesRow {
 	if c.o > 0 {
-		for i := uint64(0); i < c.o; i++ {
+		for i := int64(0); i < c.o; i++ {
 			if c.seriesCursor.Next() == nil {
 				break
 			}

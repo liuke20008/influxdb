@@ -3,13 +3,12 @@ package storage
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"strings"
 
 	"github.com/gogo/protobuf/types"
+	"github.com/influxdata/influxdb/logger"
 	"github.com/influxdata/influxdb/pkg/metrics"
-	"github.com/influxdata/influxdb/tsdb"
 	"github.com/influxdata/influxdb/tsdb/engine/tsm1"
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/ext"
@@ -79,13 +78,16 @@ func (r *rpcService) Read(req *ReadRequest, stream Storage_ReadServer) error {
 		SetTag("group_keys", groupKeys).
 		SetTag("aggregate", agg.String())
 
+	log, logEnd := logger.NewOperation(r.Logger, "Read", "storage_read")
+	defer logEnd()
+
 	if r.loggingEnabled {
-		r.Logger.Info("Read",
+		log.Info("Read request info",
 			zap.String("database", req.Database),
 			zap.String("predicate", pred),
-			zap.Uint64("series_limit", req.SeriesLimit),
-			zap.Uint64("series_offset", req.SeriesOffset),
-			zap.Uint64("points_limit", req.PointsLimit),
+			zap.Int64("series_limit", req.SeriesLimit),
+			zap.Int64("series_offset", req.SeriesOffset),
+			zap.Int64("points_limit", req.PointsLimit),
 			zap.Int64("start", req.TimestampRange.Start),
 			zap.Int64("end", req.TimestampRange.End),
 			zap.Bool("desc", req.Descending),
@@ -94,13 +96,16 @@ func (r *rpcService) Read(req *ReadRequest, stream Storage_ReadServer) error {
 		)
 	}
 
-	if req.PointsLimit == 0 {
-		req.PointsLimit = math.MaxUint64
+	var seriesOnly bool
+	if req.PointsLimit < 0 {
+		seriesOnly = true
+	} else if req.PointsLimit == 0 {
+		req.PointsLimit = math.MaxInt64
 	}
 
 	rs, err := r.Store.Read(ctx, req)
 	if err != nil {
-		r.Logger.Error("Store.Read failed", zap.Error(err))
+		log.Error("Store.Read failed", zap.Error(err))
 		return err
 	}
 
@@ -110,9 +115,10 @@ func (r *rpcService) Read(req *ReadRequest, stream Storage_ReadServer) error {
 	defer rs.Close()
 
 	w := &responseWriter{
-		stream: stream,
-		res:    &ReadResponse{Frames: make([]ReadResponse_Frame, 0, frameCount)},
-		logger: r.Logger,
+		stream:     stream,
+		res:        &ReadResponse{Frames: make([]ReadResponse_Frame, 0, frameCount)},
+		logger:     log,
+		seriesOnly: seriesOnly,
 	}
 
 	for rs.Next() {
@@ -123,28 +129,17 @@ func (r *rpcService) Read(req *ReadRequest, stream Storage_ReadServer) error {
 		}
 
 		w.startSeries(rs.Tags())
-
-		switch cur := cur.(type) {
-		case tsdb.IntegerBatchCursor:
-			w.streamIntegerPoints(cur)
-		case tsdb.FloatBatchCursor:
-			w.streamFloatPoints(cur)
-		case tsdb.UnsignedBatchCursor:
-			w.streamUnsignedPoints(cur)
-		case tsdb.BooleanBatchCursor:
-			w.streamBooleanPoints(cur)
-		case tsdb.StringBatchCursor:
-			w.streamStringPoints(cur)
-		default:
-			panic(fmt.Sprintf("unreachable: %T", cur))
-		}
-
+		w.streamCursor(cur)
 		if w.err != nil {
 			return w.err
 		}
 	}
 
 	w.flushFrames()
+
+	if r.loggingEnabled {
+		log.Info("Read completed", zap.Int("num_values", w.vc))
+	}
 
 	span.SetTag("num_values", w.vc)
 	grp := tsm1.MetricsGroupFromContext(ctx)
@@ -156,30 +151,4 @@ func (r *rpcService) Read(req *ReadRequest, stream Storage_ReadServer) error {
 	})
 
 	return nil
-}
-
-func (r *rpcService) ReadTagKeys(req *ReadTagKeysRequest, stream Storage_ReadTagKeysServer) error {
-	if r.loggingEnabled {
-		r.Logger.Info("ReadTagKeys",
-			zap.String("database", req.Database),
-			zap.String("predicate", ""),
-			zap.Int64("start", req.TimestampRange.Start),
-			zap.Int64("end", req.TimestampRange.End),
-		)
-	}
-
-	ctx := context.Background()
-	keys, err := r.Store.ReadTagKeys(ctx, req)
-	if err != nil {
-		return err
-	}
-
-	var res ReadTagKeysResponse
-	res.Keys = keys
-
-	return stream.Send(&res)
-}
-
-func (r *rpcService) ReadTagKeyValues(req *ReadTagKeyValuesRequest, stream Storage_ReadTagKeyValuesServer) error {
-	return errors.New("not implemented")
 }

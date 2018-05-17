@@ -31,14 +31,13 @@ type Command struct {
 	addr            string
 	cpuProfile      string
 	memProfile      string
-	orgID           string
 	database        string
 	retentionPolicy string
 	startTime       int64
 	endTime         int64
-	limit           uint64
-	slimit          uint64
-	soffset         uint64
+	limit           int64
+	slimit          int64
+	soffset         int64
 	desc            bool
 	silent          bool
 	expr            string
@@ -82,14 +81,13 @@ func (cmd *Command) Run(args ...string) error {
 	fs.StringVar(&cmd.cpuProfile, "cpuprofile", "", "CPU profile name")
 	fs.StringVar(&cmd.memProfile, "memprofile", "", "memory profile name")
 	fs.StringVar(&cmd.addr, "addr", ":8082", "the RPC address")
-	fs.StringVar(&cmd.orgID, "org-id", "", "Optional: org identifier when querying multi-tenant store")
 	fs.StringVar(&cmd.database, "database", "", "the database to query")
 	fs.StringVar(&cmd.retentionPolicy, "retention", "", "Optional: the retention policy to query")
 	fs.StringVar(&start, "start", "", "Optional: the start time to query (RFC3339 format)")
 	fs.StringVar(&end, "end", "", "Optional: the end time to query (RFC3339 format)")
-	fs.Uint64Var(&cmd.slimit, "slimit", 0, "Optional: limit number of series")
-	fs.Uint64Var(&cmd.soffset, "soffset", 0, "Optional: start offset for series")
-	fs.Uint64Var(&cmd.limit, "limit", 0, "Optional: limit number of values per series")
+	fs.Int64Var(&cmd.slimit, "slimit", 0, "Optional: limit number of series")
+	fs.Int64Var(&cmd.soffset, "soffset", 0, "Optional: start offset for series")
+	fs.Int64Var(&cmd.limit, "limit", 0, "Optional: limit number of values per series (-1 to return series only)")
 	fs.BoolVar(&cmd.desc, "desc", false, "Optional: return results in descending order")
 	fs.BoolVar(&cmd.silent, "silent", false, "silence output")
 	fs.StringVar(&cmd.expr, "expr", "", "InfluxQL conditional expression")
@@ -157,9 +155,6 @@ func (cmd *Command) Run(args ...string) error {
 }
 
 func (cmd *Command) validate() error {
-	if cmd.orgID != "" && cmd.retentionPolicy != "" {
-		return fmt.Errorf("omit retention policy for multi-tenant request")
-	}
 	if cmd.database == "" {
 		return fmt.Errorf("must specify a database")
 	}
@@ -172,10 +167,7 @@ func (cmd *Command) validate() error {
 func (cmd *Command) query(c storage.StorageClient) error {
 	var req storage.ReadRequest
 	req.Database = cmd.database
-	if cmd.orgID != "" {
-		req.RequestType = storage.ReadRequestTypeMultiTenant
-		req.OrgID = cmd.orgID
-	} else if cmd.retentionPolicy != "" {
+	if cmd.retentionPolicy != "" {
 		req.Database += "/" + cmd.retentionPolicy
 	}
 
