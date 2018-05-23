@@ -103,17 +103,6 @@ func (r *rpcService) Read(req *ReadRequest, stream Storage_ReadServer) error {
 		req.PointsLimit = math.MaxInt64
 	}
 
-	rs, err := r.Store.Read(ctx, req)
-	if err != nil {
-		log.Error("Store.Read failed", zap.Error(err))
-		return err
-	}
-
-	if rs == nil {
-		return nil
-	}
-	defer rs.Close()
-
 	w := &responseWriter{
 		stream:     stream,
 		res:        &ReadResponse{Frames: make([]ReadResponse_Frame, 0, frameCount)},
@@ -121,18 +110,14 @@ func (r *rpcService) Read(req *ReadRequest, stream Storage_ReadServer) error {
 		seriesOnly: seriesOnly,
 	}
 
-	for rs.Next() {
-		cur := rs.Cursor()
-		if cur == nil {
-			// no data for series key + field combination
-			continue
-		}
+	if len(req.Grouping) > 0 {
+		err = r.handleGroupRead(ctx, req, w)
+	} else {
+		err = r.handleRead(ctx, req, w)
+	}
 
-		w.startSeries(rs.Tags())
-		w.streamCursor(cur)
-		if w.err != nil {
-			return w.err
-		}
+	if err != nil {
+		log.Error("Read failed", zap.Error(err))
 	}
 
 	w.flushFrames()
@@ -149,6 +134,67 @@ func (r *rpcService) Read(req *ReadRequest, stream Storage_ReadServer) error {
 			span.SetTag(m.Name(), m.Value())
 		}
 	})
+
+	return nil
+}
+func (r *rpcService) handleRead(ctx context.Context, req *ReadRequest, w *responseWriter) error {
+	rs, err := r.Store.Read(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	if rs == nil {
+		return nil
+	}
+	defer rs.Close()
+
+	for rs.Next() {
+		cur := rs.Cursor()
+		if cur == nil {
+			// no data for series key + field combination
+			continue
+		}
+
+		w.startSeries(rs.Tags())
+		w.streamCursor(cur)
+		if w.err != nil {
+			return w.err
+		}
+	}
+
+	return nil
+}
+
+func (r *rpcService) handleGroupRead(ctx context.Context, req *ReadRequest, w *responseWriter) error {
+	rs, err := r.Store.GroupRead(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	if rs == nil {
+		return nil
+	}
+	defer rs.Close()
+
+	gc := rs.Next()
+	for gc != nil {
+		w.startGroup(gc.Keys())
+
+		for gc.Next() {
+			cur := gc.Cursor()
+			if cur == nil {
+				// no data for series key + field combination
+				continue
+			}
+
+			w.startSeries(gc.Tags())
+			w.streamCursor(cur)
+			if w.err != nil {
+				return w.err
+			}
+		}
+		gc = rs.Next()
+	}
 
 	return nil
 }

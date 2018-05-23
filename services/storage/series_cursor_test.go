@@ -24,7 +24,7 @@ func TestPlannerCondition(t *testing.T) {
 
 	p := &indexSeriesCursor{
 		sqry:            sqry,
-		fields:          []string{"user", "system", "val"},
+		fields:          measurementFields{"cpu": []field{{n: "system"}, {n: "user"}}, "mem": []field{{n: "val"}}},
 		cond:            cond,
 		measurementCond: influxql.Reduce(RewriteExprRemoveFieldValue(influxql.CloneExpr(cond)), nil),
 	}
@@ -32,13 +32,13 @@ func TestPlannerCondition(t *testing.T) {
 	var keys []string
 	row := p.Next()
 	for row != nil {
-		keys = append(keys, string(models.MakeKey(row.name, row.stags))+" "+row.field)
+		keys = append(keys, string(models.MakeKey(row.name, row.stags))+" "+row.field.n)
 		row = p.Next()
 	}
 
-	exp := []string{"cpu,host=host1 user", "cpu,host=host1 system", "mem,host=host1 user", "mem,host=host1 system", "mem,host=host1 val"}
-	if !cmp.Equal(exp, keys) {
-		t.Errorf("unexpected, %s", cmp.Diff(exp, keys))
+	exp := []string{"cpu,host=host1 system", "cpu,host=host1 user", "mem,host=host1 val"}
+	if !cmp.Equal(keys, exp) {
+		t.Errorf("unexpected -got/+want\n%s", cmp.Diff(keys, exp))
 	}
 }
 

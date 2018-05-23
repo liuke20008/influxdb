@@ -28,9 +28,38 @@ type responseWriter struct {
 		Boolean  []*ReadResponse_Frame_BooleanPoints
 		String   []*ReadResponse_Frame_StringPoints
 		Series   []*ReadResponse_Frame_Series
+		Group    []*ReadResponse_Frame_Group
 	}
 
 	seriesOnly bool
+}
+
+func (w *responseWriter) getGroupFrame(next [][]byte) *ReadResponse_Frame_Group {
+	var res *ReadResponse_Frame_Group
+	if len(w.buffer.Group) > 0 {
+		i := len(w.buffer.Group) - 1
+		res = w.buffer.Group[i]
+		w.buffer.Group[i] = nil
+		w.buffer.Group = w.buffer.Group[:i]
+	} else {
+		res = &ReadResponse_Frame_Group{&ReadResponse_GroupFrame{}}
+	}
+
+	if cap(res.Group.Keys) < len(next) {
+		res.Group.Keys = make([][]byte, len(next))
+	} else if len(res.Group.Keys) != len(next) {
+		res.Group.Keys = res.Group.Keys[:len(next)]
+	}
+
+	return res
+}
+
+func (w *responseWriter) putGroupFrame(f *ReadResponse_Frame_Group) {
+	keys := f.Group.Keys
+	for i := range keys {
+		keys[i] = nil
+	}
+	w.buffer.Group = append(w.buffer.Group, f)
 }
 
 func (w *responseWriter) getSeriesFrame(next models.Tags) *ReadResponse_Frame_Series {
@@ -60,6 +89,13 @@ func (w *responseWriter) putSeriesFrame(f *ReadResponse_Frame_Series) {
 		tags[i].Value = nil
 	}
 	w.buffer.Series = append(w.buffer.Series, f)
+}
+
+func (w *responseWriter) startGroup(next [][]byte) {
+	f := w.getGroupFrame(next)
+	copy(f.Group.Keys, next)
+	w.res.Frames = append(w.res.Frames, ReadResponse_Frame{f})
+	w.sz += f.Size()
 }
 
 func (w *responseWriter) startSeries(next models.Tags) {
@@ -137,6 +173,8 @@ func (w *responseWriter) flushFrames() {
 			w.putStringPointsFrame(p)
 		case *ReadResponse_Frame_Series:
 			w.putSeriesFrame(p)
+		case *ReadResponse_Frame_Group:
+			w.putGroupFrame(p)
 		}
 	}
 	w.res.Frames = w.res.Frames[:0]

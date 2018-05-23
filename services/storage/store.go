@@ -83,6 +83,10 @@ func (s *Store) validateArgs(database string, start, end int64) (string, string,
 }
 
 func (s *Store) Read(ctx context.Context, req *ReadRequest) (*ResultSet, error) {
+	if len(req.Grouping) > 0 {
+		panic("Read: len(Grouping) > 0")
+	}
+
 	database, rp, start, end, err := s.validateArgs(req.Database, req.TimestampRange.Start, req.TimestampRange.End)
 	if err != nil {
 		return nil, err
@@ -102,10 +106,6 @@ func (s *Store) Read(ctx context.Context, req *ReadRequest) (*ResultSet, error) 
 		cur = ic
 	}
 
-	if len(req.Grouping) > 0 {
-		cur = newGroupSeriesCursor(ctx, cur, req.Grouping)
-	}
-
 	if req.SeriesLimit > 0 || req.SeriesOffset > 0 {
 		cur = newLimitSeriesCursor(ctx, cur, req.SeriesLimit, req.SeriesOffset)
 	}
@@ -123,27 +123,40 @@ func (s *Store) Read(ctx context.Context, req *ReadRequest) (*ResultSet, error) 
 	}, nil
 }
 
-func MergeTagKeys(keys []tsdb.TagKeys) []string {
-	if len(keys) == 1 {
-		return keys[0].Keys
-	} else if len(keys) == 0 {
-		return nil
+func (s *Store) GroupRead(ctx context.Context, req *ReadRequest) (*groupResultSet, error) {
+	if len(req.Grouping) == 0 {
+		panic("GroupRead: missing grouping")
 	}
 
-	var s []string
-	for i := range keys {
-		s = append(s, keys[i].Keys...)
+	if req.SeriesLimit > 0 || req.SeriesOffset > 0 {
+		return nil, errors.New("GroupRead: SeriesLimit and SeriesOffset not supported when Grouping")
 	}
 
-	sort.Strings(s)
-
-	// dedupe
-	i := 1
-	for j := 1; j < len(s); j++ {
-		if s[i-1] != s[j] {
-			s[i] = s[j]
-			i++
-		}
+	database, rp, start, end, err := s.validateArgs(req.Database, req.TimestampRange.Start, req.TimestampRange.End)
+	if err != nil {
+		return nil, err
 	}
-	return s[:i]
+
+	shardIDs, err := s.findShardIDs(database, rp, req.Descending, start, end)
+	if err != nil {
+		return nil, err
+	}
+
+	ic, err := newIndexSeriesCursor(ctx, req, s.TSDBStore.Shards(shardIDs))
+	if err != nil {
+		return nil, err
+	} else if ic == nil {
+		return nil, nil
+	}
+
+	rr := readRequest{
+		ctx:       ctx,
+		start:     start,
+		end:       end,
+		asc:       !req.Descending,
+		limit:     req.PointsLimit,
+		aggregate: req.Aggregate,
+	}
+
+	return newGroupResultSet(ctx, rr, ic, req.Grouping), nil
 }

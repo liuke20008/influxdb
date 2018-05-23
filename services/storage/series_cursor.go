@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"sort"
@@ -27,19 +26,10 @@ type seriesCursor interface {
 type seriesRow struct {
 	name      []byte      // measurement name
 	stags     models.Tags // unmodified series tags
-	field     string
+	field     field
 	tags      models.Tags
 	query     tsdb.CursorIterators
 	valueCond influxql.Expr
-}
-
-// clone ensures name, stags and tags are deep copies
-func (r *seriesRow) clone() seriesRow {
-	nr := *r
-	r.name = append([]byte(nil), r.name...)
-	r.stags = r.stags.Clone()
-	r.tags = r.tags.Clone()
-	return nr
 }
 
 type mapValuer map[string]string
@@ -53,8 +43,8 @@ func (vs mapValuer) Value(key string) (interface{}, bool) {
 
 type indexSeriesCursor struct {
 	sqry            tsdb.SeriesCursor
-	fields          []string
-	nf              []string
+	fields          measurementFields
+	nf              []field
 	err             error
 	tags            models.Tags
 	filterset       mapValuer
@@ -188,17 +178,17 @@ RETRY:
 			c.tags.Set(measurementKey, sr.Name)
 		}
 
-		c.nf = c.fields
+		c.nf = c.fields[string(sr.Name)]
 	}
 
 	c.row.field, c.nf = c.nf[0], c.nf[1:]
-	c.filterset["_field"] = c.row.field
+	c.filterset["_field"] = c.row.field.n
 
 	if c.measurementCond != nil && !evalExprBool(c.measurementCond, c.filterset) {
 		goto RETRY
 	}
 
-	c.tags.Set(fieldKey, []byte(c.row.field))
+	c.tags.Set(fieldKey, []byte(c.row.field.n))
 
 	if c.cond != nil && c.hasValueExpr {
 		// TODO(sgc): lazily evaluate valueCond
@@ -244,78 +234,6 @@ func (c *limitSeriesCursor) Next() *seriesRow {
 	return c.seriesCursor.Next()
 }
 
-type groupSeriesCursor struct {
-	seriesCursor
-	ctx  context.Context
-	rows []seriesRow
-	keys [][]byte
-	f    bool
-}
-
-func newGroupSeriesCursor(ctx context.Context, cur seriesCursor, keys []string) *groupSeriesCursor {
-	g := &groupSeriesCursor{seriesCursor: cur, ctx: ctx}
-
-	g.keys = make([][]byte, 0, len(keys))
-	for _, k := range keys {
-		g.keys = append(g.keys, []byte(k))
-	}
-
-	return g
-}
-
-func (c *groupSeriesCursor) Next() *seriesRow {
-	if !c.f {
-		c.sort()
-	}
-
-	if len(c.rows) > 0 {
-		row := &c.rows[0]
-		c.rows = c.rows[1:]
-		return row
-	}
-
-	return nil
-}
-
-func (c *groupSeriesCursor) sort() {
-	span := opentracing.SpanFromContext(c.ctx)
-	if span != nil {
-		span = opentracing.StartSpan("group_series_cursor.sort", opentracing.ChildOf(span.Context()))
-		defer span.Finish()
-	}
-
-	var rows []seriesRow
-	row := c.seriesCursor.Next()
-	for row != nil {
-		rows = append(rows, row.clone())
-		row = c.seriesCursor.Next()
-	}
-
-	sort.Slice(rows, func(i, j int) bool {
-		for _, k := range c.keys {
-			ik := rows[i].tags.Get(k)
-			jk := rows[j].tags.Get(k)
-			cmp := bytes.Compare(ik, jk)
-			if cmp == 0 {
-				continue
-			}
-			return cmp == -1
-		}
-
-		return false
-	})
-
-	if span != nil {
-		span.SetTag("rows", len(rows))
-	}
-
-	c.rows = rows
-
-	// free early
-	c.seriesCursor.Close()
-	c.f = true
-}
-
 func isBooleanLiteral(expr influxql.Expr) bool {
 	_, ok := expr.(*influxql.BooleanLiteral)
 	return ok
@@ -330,31 +248,53 @@ func toFloatIterator(iter query.Iterator) (query.FloatIterator, error) {
 	return sitr, nil
 }
 
-func extractFields(itr query.FloatIterator) []string {
-	var a []string
+type measurementFields map[string][]field
+
+type field struct {
+	n string
+	d influxql.DataType
+}
+
+func extractFields(itr query.FloatIterator) measurementFields {
+	mf := make(measurementFields)
+
 	for {
 		p, err := itr.Next()
 		if err != nil {
 			return nil
 		} else if p == nil {
 			break
-		} else if f, ok := p.Aux[0].(string); ok {
-			a = append(a, f)
 		}
+
+		// Aux is populated by `fieldKeysIterator#Next`
+		fields := append(mf[p.Name], field{
+			n: p.Aux[0].(string),
+			d: influxql.DataTypeFromString(p.Aux[1].(string)),
+		})
+
+		mf[p.Name] = fields
 	}
 
-	if len(a) == 0 {
-		return a
+	if len(mf) == 0 {
+		return nil
 	}
 
-	sort.Strings(a)
-	i := 1
-	for j := 1; j < len(a); j++ {
-		if a[j] != a[j-1] {
-			a[i] = a[j]
-			i++
+	for k, fields := range mf {
+		sort.Slice(fields, func(i, j int) bool {
+			return fields[i].n < fields[j].n
+		})
+
+		// deduplicate
+		i := 1
+		for j := 1; j < len(fields); j++ {
+			if fields[j].n != fields[j-1].n {
+				fields[i] = fields[j]
+				i++
+			}
 		}
+
+		mf[k] = fields[:i]
 	}
 
-	return a[:i]
+	return mf
 }

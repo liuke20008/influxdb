@@ -272,6 +272,21 @@ func (cmd *Command) processFrames(wr *bufio.Writer, frames []storage.ReadRespons
 
 	for _, frame := range frames {
 		switch f := frame.Data.(type) {
+		case *storage.ReadResponse_Frame_Group:
+			g := f.Group
+			wr.WriteString("[\033[36m")
+			first := true
+			for _, t := range g.Keys {
+				if !first {
+					wr.WriteByte(',')
+				} else {
+					first = false
+				}
+				wr.Write(t)
+			}
+			wr.WriteString("\033[0m]\n")
+			wr.Flush()
+
 		case *storage.ReadResponse_Frame_Series:
 			s := f.Series
 			wr.WriteString("\033[36m")
